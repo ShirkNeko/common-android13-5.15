@@ -844,7 +844,11 @@ static inline void hrtick_rq_init(struct rq *rq)
 static bool set_nr_and_not_polling(struct task_struct *p)
 {
 	struct thread_info *ti = task_thread_info(p);
-	return !(fetch_or(&ti->flags, _TIF_NEED_RESCHED) & _TIF_POLLING_NRFLAG);
+	unsigned long flags;
+
+    flags = atomic_long_fetch_or_acquire(_TIF_NEED_RESCHED, &ti->flags);
+
+	return !(flags & _TIF_POLLING_NRFLAG);
 }
 
 /*

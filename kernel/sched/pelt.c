@@ -106,7 +106,6 @@ static __always_inline u32
 accumulate_sum(u64 delta, struct sched_avg *sa,
 	       unsigned long load, unsigned long runnable, int running)
 {
-	u32 contrib = (u32)delta; /* p == 0 -> delta < 1024 */
 	u64 periods;
 
 	delta += sa->period_contrib;
@@ -125,29 +124,27 @@ accumulate_sum(u64 delta, struct sched_avg *sa,
 		 * Step 2
 		 */
 		delta %= 1024;
-		if (load) {
-			/*
-			 * This relies on the:
-			 *
-			 * if (!load)
-			 *	runnable = running = 0;
-			 *
-			 * clause from ___update_load_sum(); this results in
-			 * the below usage of @contrib to disappear entirely,
-			 * so no point in calculating it.
-			 */
-			contrib = __accumulate_pelt_segments(periods,
-					1024 - sa->period_contrib, delta);
-		}
 	}
-	sa->period_contrib = delta;
+	/* Only calculate contrib if needed */
+	if (load || runnable || running) {
+    	u32 contrib;
+       
+    	if (periods) {
+        	contrib = __accumulate_pelt_segments(periods,
+                    	1024 - sa->period_contrib, delta);
+    	} else {
+        	contrib = (u32)delta;
+    	}
 
-	if (load)
-		sa->load_sum += load * contrib;
-	if (runnable)
-		sa->runnable_sum += runnable * contrib << SCHED_CAPACITY_SHIFT;
-	if (running)
-		sa->util_sum += contrib << SCHED_CAPACITY_SHIFT;
+    	if (load)
+        	sa->load_sum += load * contrib;
+    	if (runnable)
+        	sa->runnable_sum += runnable * contrib << SCHED_CAPACITY_SHIFT;
+    	if (running)
+        	sa->util_sum += contrib << SCHED_CAPACITY_SHIFT;
+    }
+
+    sa->period_contrib = delta;
 
 	return periods;
 }
@@ -216,8 +213,11 @@ int ___update_load_sum(u64 now, struct sched_avg *sa,
 	 *
 	 * Also see the comment in accumulate_sum().
 	 */
-	if (!load)
-		runnable = running = 0;
+    if (!load) {
+        if (!runnable && !running)
+            return 0;
+        runnable = running = 0;
+    }
 
 	/*
 	 * Now we know we crossed measurement unit boundaries. The *_avg

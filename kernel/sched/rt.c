@@ -968,7 +968,15 @@ static int sched_rt_runtime_exceeded(struct rt_rq *rt_rq)
 	if (rt_rq->rt_throttled)
 		return rt_rq_throttled(rt_rq);
 
-	if (runtime >= sched_rt_period(rt_rq))
+	/* Lockless fast path: check without locks first */
+	if (READ_ONCE(rt_rq->rt_time) < READ_ONCE(rt_rq->rt_runtime) ||
+	    runtime >= sched_rt_period(rt_rq))
+		return 0;
+
+	balance_runtime(rt_rq);
+	runtime = sched_rt_runtime(rt_rq);
+	
+	if (runtime == RUNTIME_INF || rt_rq->rt_time < runtime)
 		return 0;
 
 	balance_runtime(rt_rq);
@@ -976,6 +984,7 @@ static int sched_rt_runtime_exceeded(struct rt_rq *rt_rq)
 	if (runtime == RUNTIME_INF)
 		return 0;
 
+	/* Re-check condition after balancing and locking */
 	if (rt_rq->rt_time > runtime) {
 		struct rt_bandwidth *rt_b = sched_rt_bandwidth(rt_rq);
 
@@ -1041,22 +1050,31 @@ static void update_curr_rt(struct rq *rq)
 
 	trace_android_vh_sched_stat_runtime_rt(curr, delta_exec);
 
-	if (!rt_bandwidth_enabled())
+	if (unlikely(!rt_bandwidth_enabled()))
 		return;
 
 	for_each_sched_rt_entity(rt_se) {
 		struct rt_rq *rt_rq = rt_rq_of_se(rt_se);
 		int exceeded;
 
-		if (sched_rt_runtime(rt_rq) != RUNTIME_INF) {
-			raw_spin_lock(&rt_rq->rt_runtime_lock);
-			rt_rq->rt_time += delta_exec;
-			exceeded = sched_rt_runtime_exceeded(rt_rq);
-			if (exceeded)
-				resched_curr(rq);
-			raw_spin_unlock(&rt_rq->rt_runtime_lock);
-			if (exceeded)
-				do_start_rt_bandwidth(sched_rt_bandwidth(rt_rq));
+		/* Skip throttled runqueues */
+		if (unlikely(rt_rq_throttled(rt_rq)))
+			continue;
+
+		/* Skip runqueues with infinite runtime */
+		if (likely(sched_rt_runtime(rt_rq) == RUNTIME_INF))
+			continue;
+
+		/* Update runtime with lock held */
+		raw_spin_lock(&rt_rq->rt_runtime_lock);
+		rt_rq->rt_time += delta_exec;
+		exceeded = sched_rt_runtime_exceeded(rt_rq);
+		raw_spin_unlock(&rt_rq->rt_runtime_lock);
+
+		/* Handle exceeded runtime outside lock */
+		if (unlikely(exceeded)) {
+			resched_curr(rq);
+			do_start_rt_bandwidth(sched_rt_bandwidth(rt_rq));
 		}
 	}
 }
@@ -1305,6 +1323,11 @@ static void __enqueue_rt_entity(struct sched_rt_entity *rt_se, unsigned int flag
 	struct rt_rq *group_rq = group_rt_rq(rt_se);
 	struct list_head *queue = array->queue + rt_se_prio(rt_se);
 
+	/* Skip if already enqueued */
+	if (rt_se->on_list)
+		goto update_status;
+
+
 	/*
 	 * Don't enqueue the group if its throttled, or when empty.
 	 * The latter is a consequence of the former when a child group
@@ -1327,6 +1350,8 @@ static void __enqueue_rt_entity(struct sched_rt_entity *rt_se, unsigned int flag
 		__set_bit(rt_se_prio(rt_se), array->bitmap);
 		rt_se->on_list = 1;
 	}
+
+update_status:
 	rt_se->on_rq = 1;
 
 	inc_rt_tasks(rt_se, rt_rq);
@@ -1781,11 +1806,11 @@ static void put_prev_task_rt(struct rq *rq, struct task_struct *p)
 
 static int pick_rt_task(struct rq *rq, struct task_struct *p, int cpu)
 {
-	if (!task_running(rq, p) &&
-	    cpumask_test_cpu(cpu, &p->cpus_mask))
-		return 1;
+	/* Check affinity first to avoid unnecessary work */
+	if (!cpumask_test_cpu(cpu, &p->cpus_mask))
+		return 0;
 
-	return 0;
+	return !task_running(rq, p);
 }
 
 /*
@@ -2117,7 +2142,11 @@ out:
 static void push_rt_tasks(struct rq *rq)
 {
 	/* push_rt_task will return true if it moved an RT */
-	while (push_rt_task(rq, false))
+	while (push_rt_task(rq, false)) {
+		/* Stop pushing if overload flag is cleared */
+		if (!rq->rt.overloaded)
+			break;
+	}
 		;
 }
 
@@ -2374,6 +2403,17 @@ static void pull_rt_task(struct rq *this_rq)
 			if (p->prio < src_rq->curr->prio)
 				goto skip;
 
+			/* Skip migration-disabled tasks to avoid futile attempts */
+			if (is_migration_disabled(p)) {
+				/*
+				 * Migration disabled tasks can't be moved,
+				 * skip to next CPU
+				 */
+				push_task = get_push_task(src_rq);
+				goto skip;
+			}
+
+
 			if (is_migration_disabled(p)) {
 				push_task = get_push_task(src_rq);
 			} else {
@@ -2600,6 +2640,14 @@ static void task_tick_rt(struct rq *rq, struct task_struct *p, int queued)
 	if (p->policy != SCHED_RR)
 		return;
 
+	/* Only check time slice when it's about to expire */
+	if (p->rt.time_slice > 1) {
+		/* 
+		 * Defer full check until closer to expiration
+		 */
+		return;
+	}
+
 	if (--p->rt.time_slice)
 		return;
 
@@ -2616,6 +2664,7 @@ static void task_tick_rt(struct rq *rq, struct task_struct *p, int queued)
 			return;
 		}
 	}
+	p->rt.time_slice = sched_rr_timeslice;  /* Reset for next period */
 }
 
 static unsigned int get_rr_interval_rt(struct rq *rq, struct task_struct *task)
@@ -2934,13 +2983,19 @@ int sched_rt_handler(struct ctl_table *table, int write, void *buffer,
 	static DEFINE_MUTEX(mutex);
 	int ret;
 
+	/* Optimized read path: no lock needed for reads */
+	if (!write)
+		return proc_dointvec_minmax(table, 0, buffer, lenp, ppos);
+
+	/* Write path requires full protection */
+
 	mutex_lock(&mutex);
 	old_period = sysctl_sched_rt_period;
 	old_runtime = sysctl_sched_rt_runtime;
 
-	ret = proc_dointvec_minmax(table, write, buffer, lenp, ppos);
+	ret = proc_dointvec_minmax(table, 1, buffer, lenp, ppos);
 
-	if (!ret && write) {
+	if (!ret) {
 		ret = sched_rt_global_validate();
 		if (ret)
 			goto undo;
