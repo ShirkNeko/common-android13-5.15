@@ -4,6 +4,7 @@
 #
 
 source "lib/lz4k_oplus/Kconfig"
+source "lib/lz4p/Kconfig"
 config BINARY_PRINTF
 	def_bool n
 

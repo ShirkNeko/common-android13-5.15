@@ -2,7 +2,7 @@
 config ZRAM
 	tristate "Compressed RAM block device support"
 	depends on BLOCK && SYSFS && ZSMALLOC && CRYPTO
-	depends on CRYPTO_LZO || CRYPTO_LZ4 || CRYPTO_LZ4HC || CRYPTO_LZ4K || CRYPTO_LZ4K_OPLUS || CRYPTO_LZ4KD || CRYPTO_DEFLATE || CRYPTO_842 || CRYPTO_ZSTD
+	depends on CRYPTO_LZO || CRYPTO_LZ4 || CRYPTO_LZ4HC || CRYPTO_LZ4K || CRYPTO_LZ4K_OPLUS || XRING_ZRAM_LZ4P || CRYPTO_LZ4KD || CRYPTO_DEFLATE || CRYPTO_842 || CRYPTO_ZSTD
 	help
 	  Creates virtual block devices called /dev/zramX (X = 0, 1, ...).
 	  Pages written to these disks are compressed and stored in memory
@@ -43,6 +43,10 @@ config ZRAM_DEF_COMP_LZ4K_OPLUS
 	bool "lz4k"
 	depends on CRYPTO_LZ4K_OPLUS
 
+config ZRAM_DEF_COMP_LZ4P
+	bool "lz4p"
+	depends on XRING_ZRAM_LZ4P
+
 config ZRAM_DEF_COMP_LZ4KD
 	bool "lz4kd"
 	depends on CRYPTO_LZ4KD
@@ -69,6 +73,7 @@ config ZRAM_DEF_COMP
 	default "lz4hc" if ZRAM_DEF_COMP_LZ4HC
     	default "lz4k" if ZRAM_DEF_COMP_LZ4K
 	default "lz4k_oplus" if ZRAM_DEF_COMP_LZ4K_OPLUS
+	default "lz4p" if ZRAM_DEF_COMP_LZ4P
 	default "lz4kd" if ZRAM_DEF_COMP_LZ4KD
     	default "deflate" if ZRAM_DEF_COMP_DEFLATE
 	default "842" if ZRAM_DEF_COMP_842
