@@ -1278,6 +1278,13 @@ config SCHED_AUTOGROUP
 	  desktop applications.  Task group autogeneration is currently based
 	  upon task session.
 
+config SCHED_SCHEDHORIZON
+	bool
+	depends on ARM64 && SCHED_CORE
+	default n
+	help
+	  A SCHEDHORIZON scheduler enhancement
+
 config RT_SOFTINT_OPTIMIZATION
        bool "Improve RT scheduling during long softint execution"
        depends on ARM64

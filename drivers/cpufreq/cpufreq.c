@@ -2189,6 +2189,8 @@ void cpufreq_driver_adjust_perf(unsigned int cpu,
 	cpufreq_driver->adjust_perf(cpu, min_perf, target_perf, capacity);
 }
 
+EXPORT_SYMBOL_GPL(cpufreq_driver_adjust_perf);
+
 /**
  * cpufreq_driver_has_adjust_perf - Check "direct fast switch" callback.
  *
@@ -2199,6 +2201,8 @@ bool cpufreq_driver_has_adjust_perf(void)
 {
 	return !!cpufreq_driver->adjust_perf;
 }
+
+EXPORT_SYMBOL_GPL(cpufreq_driver_has_adjust_perf);
 
 /* Must set freqs->new to intermediate frequency */
 static int __target_intermediate(struct cpufreq_policy *policy,

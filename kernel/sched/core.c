@@ -7389,6 +7389,8 @@ unsigned long sched_cpu_util(int cpu, unsigned long max)
 }
 #endif /* CONFIG_SMP */
 
+EXPORT_SYMBOL_GPL(effective_cpu_util);
+
 /**
  * find_process_by_pid - find a process with a matching PID value.
  * @pid: the pid in question.
