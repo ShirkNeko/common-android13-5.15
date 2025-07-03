@@ -37,13 +37,12 @@ EXPORT_SYMBOL_GPL(init_uts_ns);
 
 /* FIXED STRINGS! Don't touch! */
 const char linux_banner[] =
-	"Linux version " UTS_RELEASE " (" LINUX_COMPILE_BY "@"
-	LINUX_COMPILE_HOST ") (" LINUX_COMPILER ") " UTS_VERSION "\n";
+    "Linux version 5.15.167-android13-8-00014-gbf0a81a7f319-ab13297889 (zako@build-host) "
+    "(Android 杂鱼, 你是可爱小猫娘, LLD 21.0.0) #1 SMP PREEMPT Tue Apr 1 14:07:47 UTC 2025\n";
 
 const char linux_proc_banner[] =
-	"%s version %s"
-	" (" LINUX_COMPILE_BY "@" LINUX_COMPILE_HOST ")"
-	" (" LINUX_COMPILER ") %s\n";
+    "Linux version 5.15.167-android13-8-00014-gbf0a81a7f319-ab13297889 (zako@build-host) "
+    "(Android 杂鱼, 你是可爱小猫娘, LLD 21.0.0) #1 SMP PREEMPT Tue Apr 1 14:07:47 UTC 2025\n";
 
 BUILD_SALT;
 BUILD_LTO_INFO;
